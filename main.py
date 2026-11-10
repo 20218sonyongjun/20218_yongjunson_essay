@@ -31,11 +31,8 @@ st.markdown("---")
 def load_data():
   file_name = "코스피_산업별_주가지수_20261110114354.csv"
   try:
-    # cp949 인코딩으로 CSV 읽기
     df_raw = pd.read_csv(file_name, encoding="cp949")
-
-    # 원본 구조: 행(지수종류별(1))과 열(2000~2025년)을 시계열 분석에 맞게 melt (변환)
-    id_col = df_raw.columns[0]  # '지수종류별(1)'
+    id_col = df_raw.columns[0]
     df_melted = df_raw.melt(
         id_vars=[id_col], var_name="Year", value_name="Index"
     )
@@ -44,7 +41,6 @@ def load_data():
         inplace=True,
     )
 
-    # 데이터 타입 정돈 (Year는 정수, Index는 숫자로 변환)
     df_melted["Year"] = df_melted["Year"].astype(int)
     df_melted["Index"] = pd.to_numeric(
         df_melted["Index"].astype(str).str.replace(",", ""), errors="coerce"
@@ -59,10 +55,8 @@ def load_data():
 df_melted = load_data()
 
 if not df_melted.empty:
-  # 산업 품목 리스트 추출
   industries = sorted(df_melted["Industry"].unique().tolist())
 
-  # 페이지 섹션 나누기 (라디오 버튼 활용)
   menu = st.radio(
       "페이지 이동",
       [
@@ -84,7 +78,6 @@ if not df_melted.empty:
         " 주세요."
     )
 
-    # 초기 화면은 빈칸(default=[])으로 설정하여 그래프를 비워둠
     selected_items = st.multiselect(
         "조사할 품목을 선택하세요 (여러 개 선택 가능)",
         options=industries,
@@ -97,10 +90,8 @@ if not df_melted.empty:
           " 선택해주세요."
       )
     else:
-      # 선택된 품목들만 필터링
       df_filtered = df_melted[df_melted["Industry"].isin(selected_items)]
 
-      # 다중 꺾은선 그래프 생성 (Plotly)
       fig = px.line(
           df_filtered,
           x="Year",
@@ -133,21 +124,18 @@ if not df_melted.empty:
     )
 
     if target_item:
-      # 데이터 추출 및 결측치 제거
       df_item = (
           df_melted[df_melted["Industry"] == target_item].dropna().copy()
       )
       df_item = df_item.sort_values("Year")
 
-      X = df_item[["Year"]]  # 독립변수: 연도
-      y = df_item["Index"]  # 종속변수: 주가지수
+      X = df_item[["Year"]]
+      y = df_item["Index"]
 
-      # 선형회귀(Linear Regression) 모델 학습
       model = LinearRegression()
       model.fit(X, y)
       df_item["Trend"] = model.predict(X)
 
-      # 미래 예측 연도 설정 (예: 2026년 ~ 2035년까지 10년 연장)
       last_year = int(df_item["Year"].max())
       future_years = np.arange(last_year + 1, last_year + 11)
       future_X = pd.DataFrame({"Year": future_years})
@@ -157,10 +145,7 @@ if not df_melted.empty:
           {"Year": future_years, "Index": future_pred, "Industry": target_item}
       )
 
-      # Plotly 시각화 구성
       fig = go.Figure()
-
-      # 1. 실제 과거 주가지수 그래프
       fig.add_trace(
           go.Scatter(
               x=df_item["Year"],
@@ -170,7 +155,6 @@ if not df_melted.empty:
               line=dict(color="#1f77b4", width=2),
           )
       )
-      # 2. 선형회귀 추세선
       fig.add_trace(
           go.Scatter(
               x=df_item["Year"],
@@ -180,7 +164,6 @@ if not df_melted.empty:
               line=dict(color="#ff7f0e", width=2, dash="dash"),
           )
       )
-      # 3. 미래 예측선 (2026~2035)
       fig.add_trace(
           go.Scatter(
               x=df_future["Year"],
@@ -201,7 +184,6 @@ if not df_melted.empty:
       )
       st.plotly_chart(fig, use_container_width=True)
 
-      # 통계 지표(결정계수 및 회귀 계수) 출력
       r2 = model.score(X, y)
       slope = model.coef_[0]
       intercept = model.intercept_
@@ -214,11 +196,10 @@ if not df_melted.empty:
       st.markdown(
           "#### 💡 회귀분석 결과 통계적 해석"
           f"\n- 선택한 **{target_item}** 품목의 선형회귀 모델 결정계수($R^2$)는"
-          f" `{{r2:.4f}}`입니다. (1에 가까울수록 선형 모델의 설명력이 높음을"
-          " 의미합니다)"
-          f"\n- 연간 주가지수 변화율(기울기)은 `{{slope:.4f}}`로,"
-          f" `{{'상승(양의 방향)' if slope > 0 else '하락(음의 방향)'}}` 추세를"
+          f" `{r2:.4f}`입니다."
+          f"\n- 연간 주가지수 변화율(기울기)은 `{slope:.4f}`로,"
+          f" `{'상승(양의 방향)' if slope > 0 else '하락(음의 방향)'}` 추세를"
           " 보이고 있습니다."
-          f"\n- 도출된 회귀 방정식: $\\text{{주가지수}} = {{slope:.4f}} \\times"
+          f"\n- 도출된 회귀 방정식: $\\text{{주가지수}} = {slope:.4f} \\times"
           f" \\text{{연도}} + ({intercept:.4f})$"
       )
