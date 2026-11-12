@@ -40,12 +40,10 @@ def load_data():
         columns={id_col: "Industry", "Year": "Year", "Index": "Index"},
         inplace=True,
     )
-
     df_melted["Year"] = df_melted["Year"].astype(int)
     df_melted["Index"] = pd.to_numeric(
         df_melted["Index"].astype(str).str.replace(",", ""), errors="coerce"
     )
-
     return df_melted
   except Exception as e:
     st.error(f"산업별 데이터 파일을 읽는 중 오류가 발생했습니다: {e}")
@@ -61,20 +59,19 @@ def load_avg_data():
     if "Year" not in df_avg.columns and "연도" not in df_avg.columns:
       id_col = df_avg.columns[0]
       df_avg = df_avg.melt(
-          id_vars=[id_col], var_name="Year", value_name="Avg_Index"
+          id_vars=[id_col], var_name="Year", value_name="Index"
       )
-      df_avg.rename(columns={id_col: "Category"}, inplace=True)
     else:
       df_avg.columns = [
-          "Year" if "year" in str(c).lower() or "연도" in str(c) else "Avg_Index"
+          "Year" if "year" in str(c).lower() or "연도" in str(c) else "Index"
           for c in df_avg.columns
       ]
-
     df_avg["Year"] = df_avg["Year"].astype(int)
-    df_avg["Avg_Index"] = pd.to_numeric(
-        df_avg["Avg_Index"].astype(str).str.replace(",", ""), errors="coerce"
+    df_avg["Index"] = pd.to_numeric(
+        df_avg["Index"].astype(str).str.replace(",", ""), errors="coerce"
     )
-    return df_avg.dropna().sort_values("Year")
+    df_avg["Industry"] = "전체 평균"
+    return df_avg[["Industry", "Year", "Index"]].dropna().sort_values("Year")
   except Exception as e:
     st.error(f"평균 데이터 파일을 읽는 중 오류가 발생했습니다: {e}")
     return pd.DataFrame()
@@ -83,8 +80,13 @@ def load_avg_data():
 df_melted = load_data()
 df_avg = load_avg_data()
 
-if not df_melted.empty:
-  industries = sorted(df_melted["Industry"].unique().tolist())
+if not df_melted.empty and not df_avg.empty:
+  # 전체 평균과 개별 산업을 통합하여 2페이지 분석용 리스트 구성
+  df_total = pd.concat([df_avg, df_melted], ignore_index=True)
+  industries_all = ["전체 평균"] + sorted(
+      df_melted["Industry"].unique().tolist()
+  )
+  industries_only = sorted(df_melted["Industry"].unique().tolist())
 
   menu = st.radio(
       "페이지 이동",
@@ -98,103 +100,34 @@ if not df_melted.empty:
   st.markdown("---")
 
   # -------------------------------------------------------------
-  # 페이지 1: 산업별 주가지수 (2000년~2025년) 비교 + 평균 주가지수 회귀분석
+  # 페이지 1: 평균 주가 지수 그래프 및 산업별 시계열 비교 (단순 꺾은선)
   # -------------------------------------------------------------
   if menu == "1. 산업별 주가지수 (2000년~2025년)":
-    st.subheader(
-        "📈 2000년~2025년 평균 주가 지수 회귀분석 및 미래 예측"
-    )
+    st.subheader("📈 2000년~2025년 평균 주가 지수 그래프")
     st.markdown(
-        "2000년부터 2025년까지의 전체 평균 코스피 지수 추이에 대한 선형회귀"
-        " 추세선과 향후 10년 미래 예측선입니다."
+        "2000년부터 2025년까지의 전체 평균 코스피 지수 추이를 보여주는 단순"
+        " 꺾은선 그래프입니다."
     )
 
-    if not df_avg.empty:
-      # 평균 지수 회귀분석 모델 학습
-      X_avg = df_avg[["Year"]]
-      y_avg = df_avg["Avg_Index"]
-
-      model_avg = LinearRegression()
-      model_avg.fit(X_avg, y_avg)
-      df_avg["Trend"] = model_avg.predict(X_avg)
-
-      last_year_avg = int(df_avg["Year"].max())
-      future_years_avg = np.arange(last_year_avg + 1, last_year_avg + 11)
-      future_X_avg = pd.DataFrame({"Year": future_years_avg})
-      future_pred_avg = model_avg.predict(future_X_avg)
-
-      df_future_avg = pd.DataFrame(
-          {"Year": future_years_avg, "Avg_Index": future_pred_avg}
-      )
-
-      fig_avg = go.Figure()
-      fig_avg.add_trace(
-          go.Scatter(
-              x=df_avg["Year"],
-              y=df_avg["Avg_Index"],
-              mode="lines+markers",
-              name="실제 평균 주가지수 (2000~2025)",
-              line=dict(color="#1f77b4", width=2),
-          )
-      )
-      fig_avg.add_trace(
-          go.Scatter(
-              x=df_avg["Year"],
-              y=df_avg["Trend"],
-              mode="lines",
-              name="선형회귀 추세선",
-              line=dict(color="#ff7f0e", width=2, dash="dash"),
-          )
-      )
-      fig_avg.add_trace(
-          go.Scatter(
-              x=df_future_avg["Year"],
-              y=df_future_avg["Avg_Index"],
-              mode="lines+markers",
-              name="미래 예측선 (회귀 연장)",
-              line=dict(color="#2ca02c", width=2, dash="dot"),
-          )
-      )
-
-      fig_avg.update_layout(
-          title=(
-              "2000년~2025년 평균 주가지수 회귀분석 및 미래 변동 양상 예측"
-          ),
-          xaxis_title="연도",
-          yaxis_title="평균 주가지수",
-          template="plotly_white",
-          height=450,
-          xaxis=dict(dtick=2),
-      )
-      st.plotly_chart(fig_avg, use_container_width=True)
-
-      r2_avg = model_avg.score(X_avg, y_avg)
-      slope_avg = model_avg.coef_[0]
-      intercept_avg = model_avg.intercept_
-
-      c1, c2, c3 = st.columns(3)
-      c1.metric("평균 지수 결정계수 ($R^2$)", f"{r2_avg:.4f}")
-      c2.metric("평균 지수 회귀식 기울기", f"{slope_avg:.4f}")
-      c3.metric("평균 지수 회귀식 절편", f"{intercept_avg:.4f}")
-
-      st.markdown(
-          "#### 💡 평균 주가지수 회귀분석 통계적 해석"
-          f"\n- 전체 평균 주가지수의 선형회귀 모델 결정계수($R^2$)는"
-          f" `{r2_avg:.4f}`입니다."
-          f"\n- 연간 평균 주가지수 변화율(기울기)은 `{slope_avg:.4f}`로,"
-          f" `{'상승(양의 방향)' if slope_avg > 0 else '하락(음의 방향)'}` 추세를"
-          " 보이고 있습니다."
-          f"\n- 도출된 회귀 방정식: $\\text{{평균 주가지수}} = {slope_avg:.4f}"
-          f" \\times \\text{{연도}} + ({intercept_avg:.4f})$"
-      )
-    else:
-      st.warning(
-          "⚠️ average.csv 파일을 찾을 수 없거나 데이터 구조를 확인해주세요."
-      )
+    fig_avg_simple = px.line(
+        df_avg,
+        x="Year",
+        y="Index",
+        markers=True,
+        title="2000년~2025년 평균 주가 지수 추이",
+        labels={"Index": "평균 주가지수", "Year": "연도"},
+    )
+    fig_avg_simple.update_traces(line=dict(color="#d62728", width=3))
+    fig_avg_simple.update_layout(
+        hovermode="x unified",
+        template="plotly_white",
+        height=400,
+        xaxis=dict(dtick=2),
+    )
+    st.plotly_chart(fig_avg_simple, use_container_width=True)
 
     st.markdown("---")
 
-    # 기존 산업별 시계열 비교 섹션
     st.subheader("📊 산업별 주가지수 시계열 비교 (2000년~2025년)")
     st.markdown(
         "아래 검색창(다중 선택)에서 비교하고 싶은 산업 품목들을 선택해"
@@ -203,7 +136,7 @@ if not df_melted.empty:
 
     selected_items = st.multiselect(
         "조사할 품목을 선택하세요 (여러 개 선택 가능)",
-        options=industries,
+        options=industries_only,
         default=[],
     )
 
@@ -233,23 +166,23 @@ if not df_melted.empty:
       st.plotly_chart(fig, use_container_width=True)
 
   # -------------------------------------------------------------
-  # 페이지 2: 품목별 추세선과 미래 예측 회귀분석
+  # 페이지 2: 품목별 및 전체 평균 회귀분석 및 미래 예측
   # -------------------------------------------------------------
   elif menu == "2. 품목별 회귀분석 및 미래 예측":
-    st.subheader("📈 품목별 추세선 및 미래 주가지수 회귀분석")
+    st.subheader(
+        "📈 품목별 및 전체 평균 주가지수 추세선과 미래 예측 회귀분석"
+    )
     st.markdown(
-        "회귀분석을 진행할 단일 품목을 선택하여 과거 추세선과 미래 예측 양상을"
-        " 확인합니다."
+        "회귀분석을 진행할 대상('전체 평균' 또는 개별 산업)을 선택하여 과거"
+        " 추세선과 미래 예측 양상을 확인합니다."
     )
 
     target_item = st.selectbox(
-        "회귀분석 대상 품목 선택", options=industries
+        "회귀분석 대상 선택", options=industries_all
     )
 
     if target_item:
-      df_item = (
-          df_melted[df_melted["Industry"] == target_item].dropna().copy()
-      )
+      df_item = df_total[df_total["Industry"] == target_item].dropna().copy()
       df_item = df_item.sort_values("Year")
 
       X = df_item[["Year"]]
@@ -274,7 +207,7 @@ if not df_melted.empty:
               x=df_item["Year"],
               y=df_item["Index"],
               mode="lines+markers",
-              name="실제 주가지수 (2000~2025)",
+              name=f"실제 {target_item} 지수 (2000~2025)",
               line=dict(color="#1f77b4", width=2),
           )
       )
@@ -318,7 +251,7 @@ if not df_melted.empty:
 
       st.markdown(
           "#### 💡 회귀분석 결과 통계적 해석"
-          f"\n- 선택한 **{target_item}** 품목의 선형회귀 모델 결정계수($R^2$)는"
+          f"\n- 선택한 **{target_item}** 항목의 선형회귀 모델 결정계수($R^2$)는"
           f" `{r2:.4f}`입니다."
           f"\n- 연간 주가지수 변화율(기울기)은 `{slope:.4f}`로,"
           f" `{'상승(양의 방향)' if slope > 0 else '하락(음의 방향)'}` 추세를"
