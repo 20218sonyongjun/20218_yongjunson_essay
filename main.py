@@ -26,7 +26,7 @@ st.write(
 st.markdown("---")
 
 
-# 데이터 로드 함수 (영문 파일명과 cp949 인코딩 적용)
+# 데이터 로드 함수 1: 산업별 주가지수 데이터 (industry_data.csv)
 @st.cache_data
 def load_data():
   file_name = "industry_data.csv"
@@ -48,14 +48,43 @@ def load_data():
 
     return df_melted
   except Exception as e:
-    st.error(
-        f"파일을 읽는 중 오류가 발생했습니다. 파일명을 다시 확인해주세요:"
-        f" {e}"
+    st.error(f"산업별 데이터 파일을 읽는 중 오류가 발생했습니다: {e}")
+    return pd.DataFrame()
+
+
+# 데이터 로드 함수 2: 평균 주가지수 데이터 (average.csv)
+@st.cache_data
+def load_avg_data():
+  file_name = "average.csv"
+  try:
+    df_avg = pd.read_csv(file_name, encoding="cp949")
+    # 파일 구조에 맞게 전처리 (Year, Index 형태이거나 wide 형태인 경우 대응)
+    if "Year" not in df_avg.columns and "연도" not in df_avg.columns:
+      # wide 형태인 경우 melt 처리
+      id_col = df_avg.columns[0]
+      df_avg = df_avg.melt(
+          id_vars=[id_col], var_name="Year", value_name="Avg_Index"
+      )
+      df_avg.rename(columns={id_col: "Category"}, inplace=True)
+    else:
+      # 이미 연도와 지수 컬럼이 있는 경우 표준화
+      df_avg.columns = [
+          "Year" if "year" in str(c).lower() or "연도" in str(c) else "Avg_Index"
+          for c in df_avg.columns
+      ]
+
+    df_avg["Year"] = df_avg["Year"].astype(int)
+    df_avg["Avg_Index"] = pd.to_numeric(
+        df_avg["Avg_Index"].astype(str).str.replace(",", ""), errors="coerce"
     )
+    return df_avg
+  except Exception as e:
+    st.error(f"평균 데이터 파일을 읽는 중 오류가 발생했습니다: {e}")
     return pd.DataFrame()
 
 
 df_melted = load_data()
+df_avg = load_avg_data()
 
 if not df_melted.empty:
   industries = sorted(df_melted["Industry"].unique().tolist())
@@ -75,6 +104,38 @@ if not df_melted.empty:
   # 페이지 1: 산업별 주가지수 (2000년~2025년) 비교
   # -------------------------------------------------------------
   if menu == "1. 산업별 주가지수 (2000년~2025년)":
+    # ── 추가된 평균 주가지수 그래프 섹션 ──
+    st.subheader("📈 2000년~2025년 평균 주가 지수 그래프")
+    st.markdown(
+        "2000년부터 2025년까지의 전체 평균 코스피 지수 추이를 보여주는"
+        " 그래프입니다."
+    )
+
+    if not df_avg.empty:
+      fig_avg = px.line(
+          df_avg,
+          x="Year",
+          y="Avg_Index",
+          markers=True,
+          title="2000년~2025년 평균 주가 지수 추이",
+          labels={"Avg_Index": "평균 주가지수", "Year": "연도"},
+      )
+      fig_avg.update_traces(line=dict(color="#d62728", width=3))
+      fig_avg.update_layout(
+          hovermode="x unified",
+          template="plotly_white",
+          height=400,
+          xaxis=dict(dtick=2),
+      )
+      st.plotly_chart(fig_avg, use_container_width=True)
+    else:
+      st.warning(
+          "⚠️ average.csv 파일을 찾을 수 없거나 데이터 구조를 확인해주세요."
+      )
+
+    st.markdown("---")
+
+    # 기존 산업별 시계열 비교 섹션
     st.subheader("📊 산업별 주가지수 시계열 비교 (2000년~2025년)")
     st.markdown(
         "아래 검색창(다중 선택)에서 비교하고 싶은 산업 품목들을 선택해"
