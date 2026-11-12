@@ -58,16 +58,13 @@ def load_avg_data():
   file_name = "average.csv"
   try:
     df_avg = pd.read_csv(file_name, encoding="cp949")
-    # 파일 구조에 맞게 전처리 (Year, Index 형태이거나 wide 형태인 경우 대응)
     if "Year" not in df_avg.columns and "연도" not in df_avg.columns:
-      # wide 형태인 경우 melt 처리
       id_col = df_avg.columns[0]
       df_avg = df_avg.melt(
           id_vars=[id_col], var_name="Year", value_name="Avg_Index"
       )
       df_avg.rename(columns={id_col: "Category"}, inplace=True)
     else:
-      # 이미 연도와 지수 컬럼이 있는 경우 표준화
       df_avg.columns = [
           "Year" if "year" in str(c).lower() or "연도" in str(c) else "Avg_Index"
           for c in df_avg.columns
@@ -77,7 +74,7 @@ def load_avg_data():
     df_avg["Avg_Index"] = pd.to_numeric(
         df_avg["Avg_Index"].astype(str).str.replace(",", ""), errors="coerce"
     )
-    return df_avg
+    return df_avg.dropna().sort_values("Year")
   except Exception as e:
     st.error(f"평균 데이터 파일을 읽는 중 오류가 발생했습니다: {e}")
     return pd.DataFrame()
@@ -101,33 +98,95 @@ if not df_melted.empty:
   st.markdown("---")
 
   # -------------------------------------------------------------
-  # 페이지 1: 산업별 주가지수 (2000년~2025년) 비교
+  # 페이지 1: 산업별 주가지수 (2000년~2025년) 비교 + 평균 주가지수 회귀분석
   # -------------------------------------------------------------
   if menu == "1. 산업별 주가지수 (2000년~2025년)":
-    # ── 추가된 평균 주가지수 그래프 섹션 ──
-    st.subheader("📈 2000년~2025년 평균 주가 지수 그래프")
+    st.subheader(
+        "📈 2000년~2025년 평균 주가 지수 회귀분석 및 미래 예측"
+    )
     st.markdown(
-        "2000년부터 2025년까지의 전체 평균 코스피 지수 추이를 보여주는"
-        " 그래프입니다."
+        "2000년부터 2025년까지의 전체 평균 코스피 지수 추이에 대한 선형회귀"
+        " 추세선과 향후 10년 미래 예측선입니다."
     )
 
     if not df_avg.empty:
-      fig_avg = px.line(
-          df_avg,
-          x="Year",
-          y="Avg_Index",
-          markers=True,
-          title="2000년~2025년 평균 주가 지수 추이",
-          labels={"Avg_Index": "평균 주가지수", "Year": "연도"},
+      # 평균 지수 회귀분석 모델 학습
+      X_avg = df_avg[["Year"]]
+      y_avg = df_avg["Avg_Index"]
+
+      model_avg = LinearRegression()
+      model_avg.fit(X_avg, y_avg)
+      df_avg["Trend"] = model_avg.predict(X_avg)
+
+      last_year_avg = int(df_avg["Year"].max())
+      future_years_avg = np.arange(last_year_avg + 1, last_year_avg + 11)
+      future_X_avg = pd.DataFrame({"Year": future_years_avg})
+      future_pred_avg = model_avg.predict(future_X_avg)
+
+      df_future_avg = pd.DataFrame(
+          {"Year": future_years_avg, "Avg_Index": future_pred_avg}
       )
-      fig_avg.update_traces(line=dict(color="#d62728", width=3))
+
+      fig_avg = go.Figure()
+      fig_avg.add_trace(
+          go.Scatter(
+              x=df_avg["Year"],
+              y=df_avg["Avg_Index"],
+              mode="lines+markers",
+              name="실제 평균 주가지수 (2000~2025)",
+              line=dict(color="#1f77b4", width=2),
+          )
+      )
+      fig_avg.add_trace(
+          go.Scatter(
+              x=df_avg["Year"],
+              y=df_avg["Trend"],
+              mode="lines",
+              name="선형회귀 추세선",
+              line=dict(color="#ff7f0e", width=2, dash="dash"),
+          )
+      )
+      fig_avg.add_trace(
+          go.Scatter(
+              x=df_future_avg["Year"],
+              y=df_future_avg["Avg_Index"],
+              mode="lines+markers",
+              name="미래 예측선 (회귀 연장)",
+              line=dict(color="#2ca02c", width=2, dash="dot"),
+          )
+      )
+
       fig_avg.update_layout(
-          hovermode="x unified",
+          title=(
+              "2000년~2025년 평균 주가지수 회귀분석 및 미래 변동 양상 예측"
+          ),
+          xaxis_title="연도",
+          yaxis_title="평균 주가지수",
           template="plotly_white",
-          height=400,
+          height=450,
           xaxis=dict(dtick=2),
       )
       st.plotly_chart(fig_avg, use_container_width=True)
+
+      r2_avg = model_avg.score(X_avg, y_avg)
+      slope_avg = model_avg.coef_[0]
+      intercept_avg = model_avg.intercept_
+
+      c1, c2, c3 = st.columns(3)
+      c1.metric("평균 지수 결정계수 ($R^2$)", f"{r2_avg:.4f}")
+      c2.metric("평균 지수 회귀식 기울기", f"{slope_avg:.4f}")
+      c3.metric("평균 지수 회귀식 절편", f"{intercept_avg:.4f}")
+
+      st.markdown(
+          "#### 💡 평균 주가지수 회귀분석 통계적 해석"
+          f"\n- 전체 평균 주가지수의 선형회귀 모델 결정계수($R^2$)는"
+          f" `{r2_avg:.4f}`입니다."
+          f"\n- 연간 평균 주가지수 변화율(기울기)은 `{slope_avg:.4f}`로,"
+          f" `{'상승(양의 방향)' if slope_avg > 0 else '하락(음의 방향)'}` 추세를"
+          " 보이고 있습니다."
+          f"\n- 도출된 회귀 방정식: $\\text{{평균 주가지수}} = {slope_avg:.4f}"
+          f" \\times \\text{{연도}} + ({intercept_avg:.4f})$"
+      )
     else:
       st.warning(
           "⚠️ average.csv 파일을 찾을 수 없거나 데이터 구조를 확인해주세요."
